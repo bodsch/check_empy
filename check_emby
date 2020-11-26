@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+
+# set -x
+
+DISK=
+WARNING=
+CRITICAL=
+
+E_OK=0
+E_WARNING=1
+E_CRITICAL=2
+E_UNKNOWN=3
+
+BRIEF=0
+SILENT=0
+
+show_help() {
+    echo
+    echo "$0 -d DEVICE [ -w tps,read,write -c tps,read,write ] "
+    echo "    | [ -W qlen -C qlen ] | -h"
+    echo
+    echo "This plug-in is used to be alerted when maximum hard drive io/s, bytes"
+    echo "read|write/s or average queue length is reached."
+    echo
+    echo "  -d DEVICE            DEVICE must be without /dev (ex: -d sda)."
+    echo "                       To specify a LVM logical volume use:"
+    echo "                       volgroup/logvol."
+    echo "                       To specify symlink from /dev/disk/ use full path, ex:"
+    echo "                       /dev/disk/by-id/scsi-35000c50035006fb3"
+    echo "  -w/c TPS,READ,WRITE  TPS means transfer per seconds (aka IO/s)"
+    echo "                       READ and WRITE are in bytes per second"
+    echo "  -W/C NUM             Use average queue length thresholds instead.."
+    echo "  -b                   Brief output."
+    echo "  -s                   silent output: no warnings or critials are issued"
+    echo
+    echo "Performance data for graphing is supplied for tps, read, write, avgrq-sz,"
+    echo "avgqu-sz and await (see iostat man page for details)."
+    echo
+    echo "Example: Tps, read and write thresholds:"
+    echo "    $0 -d sda -w 200,100000,100000 -c 300,200000,200000"
+    echo
+    echo "Example: Average queue length threshold:"
+    echo "    $0 -d sda -W 50 -C 100"
+    echo
+}
+
+# process args
+while [ ! -z "$1" ]; do
+    case $1 in
+        -b) BRIEF=1 ;;
+        -s|--silent) SILENT=1 ;;
+        -a|--api) shift; API_KEY=$1 ;;
+        -H|--host) shift; HOST=$1   ;;
+        -c|--check) shift; CHECK=$1 ;;
+        #-w) shift; WARNING=$1 ;;
+        #-c) shift; CRITICAL=$1 ;;
+        #-W) shift; WARN_QSZ=$1 ;;
+        #-C) shift; CRIT_QSZ=$1 ;;
+        -h|--help) show_help; exit 1 ;;
+    esac
+    shift
+done
+
+version() {
+
+  curl \
+    --silent \
+    --request get \
+    --header "accept:application/json" \
+    "http://${HOST}:8096/emby/System/Info?api_key=${API_KEY}" | \
+    jq --raw-output '.Version' 2>/dev/null
+
+  exit 0
+}
+
+update() {
+
+  data=$(curl \
+    --silent \
+    --request get \
+    --header "accept:application/json" \
+    "http://${HOST}:8096/emby/System/Info?api_key=${API_KEY}" | \
+    jq --raw-output '.HasUpdateAvailable')
+
+  if [ "${data}" = "false" ]
+  then
+    echo "no update available"
+    exit ${E_OK}
+  else
+    echo "an update is available"
+    exit ${E_CRITICAL}
+  fi
+}
+
+nowplaying() {
+
+  data=$(curl \
+    --silent \
+    --request get \
+    --header "accept:application/json" \
+    "http://${HOST}:8096/emby/Sessions?api_key=${API_KEY}" | \
+    jq --raw-output '.[1].NowPlayingItem.Name')
+
+  echo "Now playing: ${data}"
+  exit 0
+#curl 2>/dev/null -X get "http://emby.matrix.lan:8096/emby/Sessions?api_key=${API_KEY}" \
+#-H "accept:application/json" | jq -r '.[]' | cat | grep -i playmethod | wc -l
+
+
+}
+
+[ "${CHECK}" = "version" ] && version
+[ "${CHECK}" = "update" ] && update
+[ "${CHECK}" = "nowplaying" ] && nowplaying
+
+
